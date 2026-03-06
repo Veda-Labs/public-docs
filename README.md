@@ -12,7 +12,7 @@ Veda is the only vault infrastructure that is truly multi-chain and multi-protoc
 
 Veda has demonstrated consistent market leadership in the vault and curation category. Notable achievements include:
 
-* Recognized as the largest vault provider and curator in DeFi, operating at billion-dollar scale for years with zero security incidents.
+* Recognized as the largest vault provider in DeFi, operating at billion-dollar scale for years with zero security incidents.
 * Longest-running and largest general-purpose vault company in DeFi history.
 * Developed the BoringVault, the most widely used vault standard across DeFi.
 * Onboarded the first vault token, eBTC, onto Aave's main market.
