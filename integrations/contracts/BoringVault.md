@@ -56,8 +56,39 @@ import { createPublicClient, http } from 'viem'
 import { mainnet } from 'viem/chains'
 
 const publicClient = createPublicClient({ chain: mainnet, transport: http() })
-const VAULT_ADDRESS = '0xVaultAddress'
-const USER_ADDRESS  = '0xUserAddress'
+const VAULT_ADDRESS = '0x...' as const
+const USER_ADDRESS  = '0x...' as const
+
+const BORING_VAULT_ABI = [
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'totalSupply',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'decimals',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint8' }],
+  },
+  {
+    name: 'hook',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+] as const
 
 // Share balance
 const shares = await publicClient.readContract({
@@ -74,7 +105,7 @@ const totalSupply = await publicClient.readContract({
   functionName: 'totalSupply',
 })
 
-// Vault share decimals (used to calculate ONE_SHARE)
+// Vault share decimals (used to calculate ONE_SHARE = 10n ** decimals)
 const decimals = await publicClient.readContract({
   address: VAULT_ADDRESS,
   abi: BORING_VAULT_ABI,

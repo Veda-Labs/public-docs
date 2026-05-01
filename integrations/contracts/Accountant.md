@@ -60,24 +60,71 @@ Teller uses rate to calculate assets on withdrawal:
 Before any deposit or withdrawal, the Teller calls `getRateInQuoteSafe()`. If the Accountant is paused, that call reverts, and the deposit or withdrawal reverts too. You can check this directly:
 
 ```typescript
-const state = await publicClient.readContract({
+import { createPublicClient, http } from 'viem'
+import { mainnet } from 'viem/chains'
+
+const publicClient = createPublicClient({ chain: mainnet, transport: http() })
+const ACCOUNTANT_ADDRESS = '0x...' as const
+const USDC_ADDRESS       = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as const
+
+const ACCOUNTANT_ABI = [
+  {
+    name: 'getRateInQuoteSafe',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'quote', type: 'address' }],
+    outputs: [{ name: 'rateInQuote', type: 'uint256' }],
+  },
+  {
+    name: 'getRateSafe',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: 'rate', type: 'uint256' }],
+  },
+  {
+    name: 'accountantState',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [
+      { name: 'payoutAddress',                  type: 'address' },
+      { name: 'highwaterMark',                  type: 'uint96'  },
+      { name: 'feesOwedInBase',                 type: 'uint128' },
+      { name: 'totalSharesLastUpdate',          type: 'uint128' },
+      { name: 'exchangeRate',                   type: 'uint96'  },
+      { name: 'allowedExchangeRateChangeUpper', type: 'uint16'  },
+      { name: 'allowedExchangeRateChangeLower', type: 'uint16'  },
+      { name: 'lastUpdateTimestamp',            type: 'uint64'  },
+      { name: 'isPaused',                       type: 'bool'    },
+      { name: 'minimumUpdateDelayInSeconds',    type: 'uint24'  },
+      { name: 'platformFee',                    type: 'uint16'  },
+      { name: 'performanceFee',                 type: 'uint16'  },
+    ],
+  },
+] as const
+
+// accountantState has 12 named outputs — viem returns a named object when all outputs are named.
+// You can destructure directly or access by field name.
+const {
+  isPaused,
+  exchangeRate,
+  feesOwedInBase,
+  highwaterMark,
+  lastUpdateTimestamp,
+  platformFee,
+  performanceFee,
+} = await publicClient.readContract({
   address: ACCOUNTANT_ADDRESS,
   abi: ACCOUNTANT_ABI,
   functionName: 'accountantState',
 })
-// state.isPaused === true means all deposits/withdrawals are currently blocked
+// isPaused === true means all deposits/withdrawals are currently blocked
 ```
 
 ### Reading share price in a specific asset
 
 ```typescript
-import { createPublicClient, http } from 'viem'
-import { mainnet } from 'viem/chains'
-
-const publicClient = createPublicClient({ chain: mainnet, transport: http() })
-const ACCOUNTANT_ADDRESS = '0xAccountantAddress'
-const USDC_ADDRESS       = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
-
 // Share price in USDC (6 decimals)
 // Returns: how many USDC wei = 1 vault share
 const rateInUSDC = await publicClient.readContract({
@@ -92,21 +139,6 @@ const rateInBase = await publicClient.readContract({
   address: ACCOUNTANT_ADDRESS,
   abi: ACCOUNTANT_ABI,
   functionName: 'getRateSafe',
-})
-
-// Full accountant state
-const {
-  exchangeRate,
-  highwaterMark,
-  feesOwedInBase,
-  isPaused,
-  platformFee,
-  performanceFee,
-  lastUpdateTimestamp,
-} = await publicClient.readContract({
-  address: ACCOUNTANT_ADDRESS,
-  abi: ACCOUNTANT_ABI,
-  functionName: 'accountantState',
 })
 ```
 

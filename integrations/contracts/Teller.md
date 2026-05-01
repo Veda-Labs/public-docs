@@ -112,31 +112,80 @@ For native ETH: skip the approval, send ETH as `msg.value`, pass `0xEeeeeEeeeEeE
 ### Example (viem)
 
 ```typescript
-import {
-  createPublicClient,
-  createWalletClient,
-  http,
-  parseUnits,
-  maxUint256,
-} from 'viem'
+import { createPublicClient, createWalletClient, http, parseUnits } from 'viem'
 import { mainnet } from 'viem/chains'
+import { privateKeyToAccount } from 'viem/accounts'
 
-const VAULT_ADDRESS   = '0xVaultAddress'
-const TELLER_ADDRESS  = '0xTellerAddress'
-const USDC_ADDRESS    = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
-const USDC_DECIMALS   = 6
+const VAULT_ADDRESS  = '0x...' as const
+const TELLER_ADDRESS = '0x...' as const
+const USDC_ADDRESS   = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as const
+const USDC_DECIMALS  = 6
+
+// Replace with your actual account — wagmi/RainbowKit provide this in a browser context
+const account = privateKeyToAccount('0x...')
 
 const publicClient = createPublicClient({ chain: mainnet, transport: http() })
-const walletClient = createWalletClient({ chain: mainnet, transport: http() })
+const walletClient  = createWalletClient({ account, chain: mainnet, transport: http() })
+
+const TELLER_ABI = [
+  {
+    name: 'assetData',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'asset', type: 'address' }],
+    outputs: [
+      { name: 'allowDeposits', type: 'bool' },
+      { name: 'allowWithdraws', type: 'bool' },
+      { name: 'sharePremium', type: 'uint16' },
+    ],
+  },
+  {
+    name: 'deposit',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'depositAsset', type: 'address' },
+      { name: 'depositAmount', type: 'uint256' },
+      { name: 'minimumMint', type: 'uint256' },
+      { name: 'referralAddress', type: 'address' },
+    ],
+    outputs: [{ name: 'shares', type: 'uint256' }],
+  },
+  {
+    name: 'withdraw',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'withdrawAsset', type: 'address' },
+      { name: 'shareAmount', type: 'uint256' },
+      { name: 'minimumAssets', type: 'uint256' },
+      { name: 'to', type: 'address' },
+    ],
+    outputs: [{ name: 'assetsOut', type: 'uint256' }],
+  },
+] as const
+
+const ERC20_ABI = [
+  {
+    name: 'approve',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const
 
 // 1. Check asset is supported
-const [assetData] = await publicClient.readContract({
+const assetData = await publicClient.readContract({
   address: TELLER_ADDRESS,
   abi: TELLER_ABI,
   functionName: 'assetData',
   args: [USDC_ADDRESS],
 })
-// assetData.allowDeposits must be true
+// assetData.allowDeposits must be true before proceeding
 
 // 2. Approve the VAULT (not the Teller) to spend USDC
 await walletClient.writeContract({
@@ -148,10 +197,10 @@ await walletClient.writeContract({
 
 // 3. Deposit
 const depositAmount = parseUnits('1000', USDC_DECIMALS)
-// WARNING: never use 0n for minimumShares in production — this exposes the tx to sandwich attacks
-// Calculate expected shares off-chain: depositAmount * ONE_SHARE / getRateInQuoteSafe(asset)
-// Then apply a slippage tolerance, e.g. 0.1% = multiply by 0.999
-const minimumShares = 0n  // replace with a real slippage-protected value
+// Never pass 0n in production - exposes the tx to sandwich attacks.
+// Expected shares = depositAmount * ONE_SHARE / getRateInQuoteSafe(asset).
+// Apply a slippage tolerance before using as minimumMint.
+const minimumShares = 0n
 
 const txHash = await walletClient.writeContract({
   address: TELLER_ADDRESS,
@@ -161,14 +210,14 @@ const txHash = await walletClient.writeContract({
 })
 
 // 4. Withdraw later (after share lock expires)
-const shareAmount = parseUnits('990', 18)  // vault share decimals
+const shareAmount   = parseUnits('990', 18)
 const minimumAssets = parseUnits('985', USDC_DECIMALS)
 
 await walletClient.writeContract({
   address: TELLER_ADDRESS,
   abi: TELLER_ABI,
   functionName: 'withdraw',
-  args: [USDC_ADDRESS, shareAmount, minimumAssets, walletClient.account.address],
+  args: [USDC_ADDRESS, shareAmount, minimumAssets, account.address],
 })
 ```
 

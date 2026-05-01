@@ -107,15 +107,109 @@ creationTime
 ### Example (viem)
 
 ```typescript
-import { createPublicClient, createWalletClient, http, parseUnits } from 'viem'
+import { createPublicClient, createWalletClient, http, parseUnits, decodeEventLog } from 'viem'
 import { mainnet } from 'viem/chains'
+import { privateKeyToAccount } from 'viem/accounts'
 
-const QUEUE_ADDRESS       = '0xQueueAddress'
-const VAULT_ADDRESS       = '0xVaultAddress'   // vault shares = ERC20
-const USDC_ADDRESS        = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+const QUEUE_ADDRESS = '0x...' as const
+const VAULT_ADDRESS = '0x...' as const
+const USDC_ADDRESS  = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as const
+
+const account = privateKeyToAccount('0x...')
 
 const publicClient = createPublicClient({ chain: mainnet, transport: http() })
-const walletClient = createWalletClient({ chain: mainnet, transport: http() })
+const walletClient  = createWalletClient({ account, chain: mainnet, transport: http() })
+
+const QUEUE_ABI = [
+  {
+    name: 'withdrawAssets',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'asset', type: 'address' }],
+    outputs: [
+      { name: 'allowWithdraws', type: 'bool' },
+      { name: 'secondsToMaturity', type: 'uint24' },
+      { name: 'minimumSecondsToDeadline', type: 'uint24' },
+      { name: 'minDiscount', type: 'uint16' },
+      { name: 'maxDiscount', type: 'uint16' },
+      { name: 'minimumShares', type: 'uint96' },
+      { name: 'withdrawCapacity', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'previewAssetsOut',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'assetOut', type: 'address' },
+      { name: 'amountOfShares', type: 'uint128' },
+      { name: 'discount', type: 'uint16' },
+    ],
+    outputs: [{ name: 'amountOfAssets', type: 'uint128' }],
+  },
+  {
+    name: 'requestOnChainWithdraw',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'assetOut', type: 'address' },
+      { name: 'amountOfShares', type: 'uint128' },
+      { name: 'discount', type: 'uint16' },
+      { name: 'secondsToDeadline', type: 'uint24' },
+    ],
+    outputs: [{ name: 'requestId', type: 'bytes32' }],
+  },
+  {
+    name: 'cancelOnChainWithdraw',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'request',
+        type: 'tuple',
+        components: [
+          { name: 'nonce', type: 'uint96' },
+          { name: 'user', type: 'address' },
+          { name: 'assetOut', type: 'address' },
+          { name: 'amountOfShares', type: 'uint128' },
+          { name: 'amountOfAssets', type: 'uint128' },
+          { name: 'creationTime', type: 'uint40' },
+          { name: 'secondsToMaturity', type: 'uint24' },
+          { name: 'secondsToDeadline', type: 'uint24' },
+        ],
+      },
+    ],
+    outputs: [{ name: 'requestId', type: 'bytes32' }],
+  },
+  {
+    name: 'OnChainWithdrawRequested',
+    type: 'event',
+    inputs: [
+      { name: 'requestId', type: 'bytes32', indexed: true },
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'assetOut', type: 'address', indexed: true },
+      { name: 'nonce', type: 'uint96', indexed: false },
+      { name: 'amountOfShares', type: 'uint128', indexed: false },
+      { name: 'amountOfAssets', type: 'uint128', indexed: false },
+      { name: 'creationTime', type: 'uint40', indexed: false },
+      { name: 'secondsToMaturity', type: 'uint24', indexed: false },
+      { name: 'secondsToDeadline', type: 'uint24', indexed: false },
+    ],
+  },
+] as const
+
+const ERC20_ABI = [
+  {
+    name: 'approve',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const
 
 // 1. Check asset config
 const withdrawAsset = await publicClient.readContract({
@@ -124,11 +218,12 @@ const withdrawAsset = await publicClient.readContract({
   functionName: 'withdrawAssets',
   args: [USDC_ADDRESS],
 })
-// withdrawAsset.allowWithdraws must be true
+// withdrawAsset.allowWithdraws must be true before proceeding
 
 // 2. Preview how many USDC you'd receive
-const shareAmount = parseUnits('100', 18)   // 100 vault shares
-const discount    = 50                       // 0.5% discount in bps
+const shareAmount       = parseUnits('100', 18)  // 100 vault shares (uint128 input)
+const discount          = 50n                     // 0.5% in bps — bigint required for uint16
+const secondsToDeadline = 604800n                 // 7 days — bigint required for uint24
 
 const assetsOut = await publicClient.readContract({
   address: QUEUE_ADDRESS,
@@ -145,9 +240,7 @@ await walletClient.writeContract({
   args: [QUEUE_ADDRESS, shareAmount],
 })
 
-// 4. Submit request (deadline window = 7 days)
-const secondsToDeadline = 7 * 24 * 60 * 60  // 604800
-
+// 4. Submit request
 const txHash = await walletClient.writeContract({
   address: QUEUE_ADDRESS,
   abi: QUEUE_ABI,
@@ -155,13 +248,32 @@ const txHash = await walletClient.writeContract({
   args: [USDC_ADDRESS, shareAmount, discount, secondsToDeadline],
 })
 
-// 5. Parse the OnChainWithdrawRequested event to get requestId and struct
-//    Store the full OnChainWithdraw struct — you need it to cancel or track
+// 5. Parse the event to recover the full OnChainWithdraw struct
+//    You must store this — the contract only stores the hash, not the struct itself
 const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
-// Parse logs for OnChainWithdrawRequested event...
+const log = receipt.logs.find(
+  l => l.address.toLowerCase() === QUEUE_ADDRESS.toLowerCase()
+)
+const { args: eventArgs } = decodeEventLog({
+  abi: QUEUE_ABI,
+  eventName: 'OnChainWithdrawRequested',
+  data: log!.data,
+  topics: log!.topics,
+})
+// Store eventArgs — you need nonce, creationTime, secondsToMaturity to reconstruct
+// the struct later if you want to cancel
 
 // 6. Cancel if needed (before a solver fills it)
-// const request = { nonce, user, assetOut, amountOfShares, amountOfAssets, creationTime, secondsToMaturity, secondsToDeadline }
+// const request = {
+//   nonce:             eventArgs.nonce,
+//   user:              account.address,
+//   assetOut:          USDC_ADDRESS,
+//   amountOfShares:    shareAmount,
+//   amountOfAssets:    eventArgs.amountOfAssets,
+//   creationTime:      eventArgs.creationTime,
+//   secondsToMaturity: eventArgs.secondsToMaturity,
+//   secondsToDeadline: secondsToDeadline,
+// }
 // await walletClient.writeContract({
 //   address: QUEUE_ADDRESS,
 //   abi: QUEUE_ABI,
